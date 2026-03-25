@@ -1,41 +1,54 @@
 import streamlit as st
-from downloader import download_instagram_images
+import instaloader
 import os
+import zipfile
+from urllib.parse import urlparse
 
-st.set_page_config(page_title="Instagram Downloader", layout="centered")
+st.title("📸 Instagram Downloader")
 
-st.title("📸 Instagram Profile Downloader")
+def extract_username(url):
+    try:
+        path = urlparse(url).path
+        return path.strip("/").split("/")[0]
+    except:
+        return None
 
-profile_url = st.text_input("Instagram Profile URL")
-download_path = st.text_input("Download Folder", "./downloads")
 
-st.sidebar.header("🔐 Login (optional)")
-username = st.sidebar.text_input("Username")
-password = st.sidebar.text_input("Password", type="password")
+profile_url = st.text_input("Enter Instagram Profile URL")
 
 if st.button("Download"):
-    if not profile_url:
-        st.error("Please enter a profile URL")
-    else:
-        os.makedirs(download_path, exist_ok=True)
+    username = extract_username(profile_url)
 
-        progress = st.progress(0)
-        status = st.empty()
+    if not username:
+        st.error("Invalid URL")
+        st.stop()
 
-        def update_progress(count):
-            status.text(f"Downloaded {count} posts...")
-            progress.progress(min(count / 50, 1.0))  # rough scaling
+    L = instaloader.Instaloader()
 
-        try:
-            count, user = download_instagram_images(
-                profile_url,
-                download_path,
-                username if username else None,
-                password if password else None,
-                progress_callback=update_progress
-            )
+    try:
+        profile = instaloader.Profile.from_username(L.context, username)
+    except Exception as e:
+        st.error(f"Profile not found: {e}")
+        st.stop()
 
-            st.success(f"Done! Downloaded {count} posts from @{user}")
+    folder = f"temp_{username}"
+    os.makedirs(folder, exist_ok=True)
 
-        except Exception as e:
-            st.error(f"Error: {e}")
+    st.info("Downloading posts...")
+
+    for i, post in enumerate(profile.get_posts()):
+        L.download_post(post, target=folder)
+
+        if i > 20:   # safety limit (remove if you want full download)
+            break
+
+    zip_path = f"{folder}.zip"
+
+    with zipfile.ZipFile(zip_path, "w") as zipf:
+        for root, _, files in os.walk(folder):
+            for file in files:
+                zipf.write(os.path.join(root, file),
+                           arcname=file)
+
+    with open(zip_path, "rb") as f:
+        st.download_button("⬇ Download ZIP", f, file_name=f"{username}.zip")
